@@ -58,7 +58,16 @@ exports.deleteProduct = asyncHandler(
 // @access Public
 exports.getProducts = asyncHandler(
     async (req, res) => {
-        const page = req.query.page * 1 || 1;
+        // Filtering
+        const queryStringObj ={...req.query} ;
+        const excludesFeilds = ['page','sort','keyword'];
+        excludesFeilds.forEach((field)=> delete queryStringObj[field]);
+        // filtering using gte|gt|lte|lt
+        let queryStr= JSON.stringify(queryStringObj);
+        queryStr = queryStr.replace(/\b(gte|gt|lte|lt)\b/g,(match)=>`$${match}`);
+
+        // Pagination
+        const page = req.query.page * 1 || 1; 
         const limit = req.query.limit * 1 || 5;
         const skip = (page - 1) * limit;
         const totalProductsNum = (await ProductModel.find({})).length;
@@ -69,8 +78,32 @@ exports.getProducts = asyncHandler(
         } else {
             totlalPages = Math.round((totalProductsNum / limit)) + 1;
         }
+        // Build Query
+        let mongooseQuery = ProductModel.find(JSON.parse(queryStr))
+            .skip(skip)
+            .limit(limit)
+            .populate({path:'category', select:['name','_id']});
 
-        const products = await ProductModel.find({}).skip(skip).limit(limit);
+        // Sorting
+        if(req.query.sort){
+            const sortBy = req.query.sort.split(',').join(' ');
+            mongooseQuery = mongooseQuery.sort(sortBy);
+        }else{
+            mongooseQuery = mongooseQuery.sort('createdAt');
+        }
+        // Searching
+        if(req.query.keyword){
+            const query = {};
+            query.$or = [
+                {title: {$regex :req.query.keyword, $options:'i'}},
+                {description: {$regex :req.query.keyword, $options:'i'}}
+            ];
+            mongooseQuery = mongooseQuery.find(query);
+        }
+
+        // Execute Query
+        const products = await mongooseQuery;
+
         res.status(200).json({ result: products.length, page: page, totlalPages, totalProductsNum: totalProductsNum, data: products });
     }
 );
