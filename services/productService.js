@@ -2,6 +2,7 @@ const slugify = require('slugify');
 const asyncHandler = require('express-async-handler');
 const ApiError = require('../utils/apiError');
 const ProductModel = require('../models/productModel');
+const ApiFeatures = require('../utils/apiFeatures');
 
 // @desc Create Product
 // @route POST /api/v1/product
@@ -58,53 +59,21 @@ exports.deleteProduct = asyncHandler(
 // @access Public
 exports.getProducts = asyncHandler(
     async (req, res) => {
-        // Filtering
-        const queryStringObj ={...req.query} ;
-        const excludesFeilds = ['page','sort','keyword'];
-        excludesFeilds.forEach((field)=> delete queryStringObj[field]);
-        // filtering using gte|gt|lte|lt
-        let queryStr= JSON.stringify(queryStringObj);
-        queryStr = queryStr.replace(/\b(gte|gt|lte|lt)\b/g,(match)=>`$${match}`);
-
-        // Pagination
-        const page = req.query.page * 1 || 1; 
-        const limit = req.query.limit * 1 || 5;
-        const skip = (page - 1) * limit;
         const totalProductsNum = (await ProductModel.find({})).length;
-        let totlalPages = 0;
-
-        if ((totalProductsNum % limit) === 0) {
-            totlalPages = totalProductsNum / limit;
-        } else {
-            totlalPages = Math.round((totalProductsNum / limit)) + 1;
-        }
         // Build Query
-        let mongooseQuery = ProductModel.find(JSON.parse(queryStr))
-            .skip(skip)
-            .limit(limit)
-            .populate({path:'category', select:['name','_id']});
-
-        // Sorting
-        if(req.query.sort){
-            const sortBy = req.query.sort.split(',').join(' ');
-            mongooseQuery = mongooseQuery.sort(sortBy);
-        }else{
-            mongooseQuery = mongooseQuery.sort('createdAt');
-        }
-        // Searching
-        if(req.query.keyword){
-            const query = {};
-            query.$or = [
-                {title: {$regex :req.query.keyword, $options:'i'}},
-                {description: {$regex :req.query.keyword, $options:'i'}}
-            ];
-            mongooseQuery = mongooseQuery.find(query);
-        }
-
+        const apiFeatures = new ApiFeatures(ProductModel.find(),req.query)
+        .paginate(totalProductsNum)
+        .filter()
+        .sort()
+        .search();
         // Execute Query
-        const products = await mongooseQuery;
-
-        res.status(200).json({ result: products.length, page: page, totlalPages, totalProductsNum: totalProductsNum, data: products });
+        const products = await apiFeatures.mongooseQuery;
+        res.status(200).json({ 
+            result: products.length,
+            totlalPages:apiFeatures.totlalPages,
+            productsNumber:totalProductsNum,
+            page: apiFeatures.page, 
+            data: products });
     }
 );
 
